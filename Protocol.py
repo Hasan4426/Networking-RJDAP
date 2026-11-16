@@ -15,7 +15,7 @@ class MessageTypes(IntEnum):
     TASK_DISPATCH=3
     TASK_RESULT=4
     ACK_RESULT=5
-    STOP = 6
+    SHUTDOWN = 6
 
 def calculate_checksum(payload: bytes)->int:
     return zlib.crc32(payload) & 0xFFFFFFFF
@@ -26,7 +26,7 @@ def create_packet(message_type,Task_id,worker_id,attempt_num,payload=b"" ):
         raise TypeError("Payload must be bytes")
 
     if len(payload)>Max_Payload_Size:
-        raise ValueError("Payload exceeds 512 bytes")
+        raise ValueError(f"Payload exceeds {Max_Payload_Size} bytes")
 
     checksum=calculate_checksum(payload)
 

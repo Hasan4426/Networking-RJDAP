@@ -49,9 +49,9 @@ def send_message(server, address, message_type, task_id, worker_id,
 
 
 def main():
-    # STOP must be added to Protocol.py before running this server.
-    if not hasattr(MessageTypes, "STOP"):
-        log("ERROR: add STOP = 6 to MessageTypes in Protocol.py before running")
+
+    if not hasattr(MessageTypes, "SHUTDOWN"):
+        log("ERROR: add SHUTDOWN = 6 to MessageTypes in Protocol.py before running")
         return 1
 
     try:
@@ -83,7 +83,7 @@ def main():
             tasks_per_worker = {worker_id: 0 for worker_id in worker_ids}
             started = time.monotonic()
 
-            # Sequential baseline: one outstanding task, round-robin assignment.
+
             for task_id in range(1, TASK_COUNT + 1):
                 worker_id = worker_ids[(task_id - 1) % WORKER_COUNT]
                 worker_address = workers[worker_id]
@@ -128,7 +128,7 @@ def main():
 
             elapsed = time.monotonic() - started
             for worker_id, worker_address in workers.items():
-                send_message(server, worker_address, MessageTypes.STOP,
+                send_message(server, worker_address, MessageTypes.SHUTDOWN,
                              0, worker_id, 0)
             log(f"Completed {len(completed_tasks)}/{TASK_COUNT} tasks in {elapsed:.3f} seconds")
             for worker_id, count in tasks_per_worker.items():
