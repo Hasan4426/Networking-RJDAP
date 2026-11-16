@@ -34,3 +34,8 @@ server's task-processing time.
 To run the test only once:
 
 python run_baseline.py --runs 1
+
+
+
+PHASE ONE VIDEO:
+https://drive.google.com/drive/folders/1GtDJYeI33lfAuQn5xPgKP4AizhUNUs06?usp=sharing
