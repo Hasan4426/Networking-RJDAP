@@ -1,14 +1,3 @@
-"""Automate the four-worker, 1000-task local baseline.
-
-Place beside Protocol.py, server.py, and worker.py, then run:
-    python run_baseline.py
-Or point to the project:
-    python run_baseline.py --project "C:/path/to/Networking-RJDAP"
-
-No third-party packages needed. No network impairments are applied.
-Verifies task results, execution counts, acknowledgments, and shutdowns.
-"""
-
 import argparse
 import csv
 import json
@@ -26,7 +15,6 @@ def read_log(path):
 
 
 def stop_process(process):
-    """Clean up only a process started by this script."""
     if process is not None and process.poll() is None:
         process.terminate()
         try:
