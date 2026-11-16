@@ -34,7 +34,7 @@ def receive_message(server, deadline):
             log(f"DROP invalid packet: {error}")
             continue
 
-        message_type, task_id, worker_id, attempt_num, payload = message
+        version, message_type, task_id, worker_id, attempt_num, payload = message
         log(f"DECODE type={message_type.name} task={task_id} "
             f"worker={worker_id} attempt={attempt_num} payload={payload!r}")
         return message, address
@@ -58,7 +58,7 @@ def main():
             deadline = time.monotonic() + JOIN_TIMEOUT
             while True:
                 message, address = receive_message(server, deadline)
-                message_type, task_id, worker_id, attempt_num, payload = message
+                version, message_type, task_id, worker_id, attempt_num, payload = message
                 if (message_type == MessageTypes.WORKER_JOIN and task_id == 0
                         and worker_id > 0 and payload == b""):
                     worker_address = address
@@ -75,7 +75,7 @@ def main():
             deadline = time.monotonic() + RESULT_TIMEOUT
             while True:
                 message, address = receive_message(server, deadline)
-                message_type, task_id, worker_id, attempt_num, payload = message
+                version, message_type, task_id, worker_id, attempt_num, payload = message
 
                 if address != worker_address or worker_id != registered_worker_id:
                     log("DROP: message is not from the registered worker")
