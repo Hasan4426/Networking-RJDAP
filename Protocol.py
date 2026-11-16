@@ -3,7 +3,8 @@ import zlib
 from enum import IntEnum
 
 Max_Packet_Size=512
-Header_Format="!BIHBI"
+VERSION=1
+Header_Format="!BBIHBI"
 Header_Size=struct.calcsize(Header_Format)
 Max_Payload_Size=Max_Packet_Size-Header_Size
 
@@ -29,7 +30,7 @@ def create_packet(message_type,Task_id,worker_id,attempt_num,payload=b"" ):
 
     checksum=calculate_checksum(payload)
 
-    header= struct.pack(Header_Format,int(message_type),Task_id,worker_id,attempt_num,checksum)
+    header= struct.pack(Header_Format, VERSION,int(message_type),Task_id,worker_id,attempt_num,checksum)
 
     return header+ payload
 
@@ -43,7 +44,10 @@ def decode_packet(packet):
     header=packet[:Header_Size]
     payload=packet[Header_Size:]
 
-    (message_type, Task_id, worker_id, attempt_num, received_checksum)=struct.unpack(Header_Format,header)
+    (version,message_type, Task_id, worker_id, attempt_num, received_checksum)=struct.unpack(Header_Format,header)
+
+    if version != VERSION:
+        raise ValueError(f"Unsupported protocol version: {version}")
 
     message_type=MessageTypes(message_type)
 
@@ -52,4 +56,4 @@ def decode_packet(packet):
     if received_checksum != expected_checksum:
         raise ValueError("checksum mismatch")
 
-    return(message_type, Task_id, worker_id, attempt_num, payload)
+    return(version, message_type, Task_id, worker_id, attempt_num, payload)
