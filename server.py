@@ -8,10 +8,9 @@ from Protocol import MessageTypes, create_packet, decode_packet
 SERVER_ADDRESS = ("127.0.0.1", 1111)
 JOIN_TIMEOUT = 60
 RESULT_TIMEOUT = 10
-TASK_ID = 1
+WORKER_COUNT = 4
+TASK_COUNT = 1000
 ATTEMPT_NUM = 1
-NUMBER_1 = 1
-NUMBER_2 = 100
 
 
 def log(message):
@@ -50,61 +49,95 @@ def send_message(server, address, message_type, task_id, worker_id,
 
 
 def main():
+    # STOP must be added to Protocol.py before running this server.
+    if not hasattr(MessageTypes, "STOP"):
+        log("ERROR: add STOP = 6 to MessageTypes in Protocol.py before running")
+        return 1
+
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as server:
             server.bind(SERVER_ADDRESS)
-            log(f"Server listening on {SERVER_ADDRESS}; waiting for WORKER_JOIN")
+            log(f"Server listening on {SERVER_ADDRESS}; waiting for {WORKER_COUNT} workers")
 
+            workers = {}
             deadline = time.monotonic() + JOIN_TIMEOUT
-            while True:
+            while len(workers) < WORKER_COUNT:
                 message, address = receive_message(server, deadline)
                 version, message_type, task_id, worker_id, attempt_num, payload = message
-                if (message_type == MessageTypes.WORKER_JOIN and task_id == 0
-                        and worker_id > 0 and payload == b""):
-                    worker_address = address
-                    registered_worker_id = worker_id
+                if (message_type != MessageTypes.WORKER_JOIN or task_id != 0
+                        or worker_id <= 0 or payload != b""):
+                    log("DROP: expected a valid WORKER_JOIN")
+                    continue
+                if worker_id in workers:
+                    log(f"DROP: worker ID {worker_id} is already registered")
+                    continue
+                if address in workers.values():
+                    log(f"DROP: address {address} is already registered")
+                    continue
+                workers[worker_id] = address
+                log(f"Registered worker {worker_id} at {address} "
+                    f"({len(workers)}/{WORKER_COUNT})")
+
+            worker_ids = sorted(workers)
+            completed_tasks = set()
+            tasks_per_worker = {worker_id: 0 for worker_id in worker_ids}
+            started = time.monotonic()
+
+            # Sequential baseline: one outstanding task, round-robin assignment.
+            for task_id in range(1, TASK_COUNT + 1):
+                worker_id = worker_ids[(task_id - 1) % WORKER_COUNT]
+                worker_address = workers[worker_id]
+                number_1, number_2 = task_id, 100
+                expected_result = number_1 + number_2
+                task_payload = f"{number_1},{number_2}".encode("ascii")
+                send_message(server, worker_address, MessageTypes.TASK_DISPATCH,
+                             task_id, worker_id, ATTEMPT_NUM, task_payload)
+
+                deadline = time.monotonic() + RESULT_TIMEOUT
+                while True:
+                    message, address = receive_message(server, deadline)
+                    (version, message_type, received_task_id, received_worker_id,
+                     received_attempt, payload) = message
+                    if address != worker_address or received_worker_id != worker_id:
+                        log("DROP: result is not from the assigned worker")
+                        continue
+                    if message_type != MessageTypes.TASK_RESULT:
+                        log("DROP: expected TASK_RESULT")
+                        continue
+                    if received_task_id in completed_tasks:
+                        log(f"DROP: duplicate result for task {received_task_id}")
+                        continue
+                    if received_task_id != task_id or received_attempt != ATTEMPT_NUM:
+                        log("DROP: wrong task ID or attempt number")
+                        continue
+                    try:
+                        result = int(payload.decode("ascii"))
+                    except (UnicodeDecodeError, ValueError):
+                        log("DROP: result must be an ASCII integer")
+                        continue
+                    if result != expected_result:
+                        log(f"DROP: incorrect result {result}; expected {expected_result}")
+                        continue
+
+                    completed_tasks.add(task_id)
+                    tasks_per_worker[worker_id] += 1
+                    log(f"Task {task_id} completed: {number_1} + {number_2} = {result}")
+                    send_message(server, worker_address, MessageTypes.ACK_RESULT,
+                                 task_id, worker_id, ATTEMPT_NUM)
                     break
-                log("DROP: expected WORKER_JOIN with task=0, worker>0, empty payload")
 
-            log(f"Registered worker {registered_worker_id} at {worker_address}")
-
-            task_payload = f"{NUMBER_1},{NUMBER_2}".encode("ascii")
-            send_message(server, worker_address, MessageTypes.TASK_DISPATCH,
-                         TASK_ID, registered_worker_id, ATTEMPT_NUM, task_payload)
-
-            deadline = time.monotonic() + RESULT_TIMEOUT
-            while True:
-                message, address = receive_message(server, deadline)
-                version, message_type, task_id, worker_id, attempt_num, payload = message
-
-                if address != worker_address or worker_id != registered_worker_id:
-                    log("DROP: message is not from the registered worker")
-                    continue
-
-                if (message_type != MessageTypes.TASK_RESULT or task_id != TASK_ID
-                        or attempt_num != ATTEMPT_NUM):
-                    log("DROP: expected TASK_RESULT for the current task and attempt")
-                    continue
-
-                try:
-                    result = int(payload.decode("ascii"))
-                except (UnicodeDecodeError, ValueError):
-                    log("DROP: result payload is not an ASCII integer")
-                    continue
-
-                if result != NUMBER_1 + NUMBER_2:
-                    log(f"DROP: incorrect result {result}; expected {NUMBER_1 + NUMBER_2}")
-                    continue
-                break
-
-            log(f"Task {TASK_ID} completed: {NUMBER_1} + {NUMBER_2} = {result}")
-            send_message(server, worker_address, MessageTypes.ACK_RESULT,
-                         TASK_ID, registered_worker_id, ATTEMPT_NUM)
+            elapsed = time.monotonic() - started
+            for worker_id, worker_address in workers.items():
+                send_message(server, worker_address, MessageTypes.STOP,
+                             0, worker_id, 0)
+            log(f"Completed {len(completed_tasks)}/{TASK_COUNT} tasks in {elapsed:.3f} seconds")
+            for worker_id, count in tasks_per_worker.items():
+                log(f"Worker {worker_id} completed {count} tasks")
             log("Exchange complete; server closing")
         return 0
 
     except TimeoutError:
-        log("ERROR: timed out waiting for the worker join or a valid task result")
+        log("ERROR: timed out waiting for workers or a valid result")
         return 1
     except OSError as error:
         log(f"ERROR: socket operation failed: {error}")

@@ -31,44 +31,102 @@ def send_and_wait(sock, packet, expected_type):
             continue
         log(f"RECV {msg_type.name} task={task_id} worker={worker_id}")
         if msg_type == expected_type:
-            return task_id, payload
+            return task_id, attempt, payload
         log(f"ignored {msg_type.name} (waiting for {expected_type.name})")
+
+
+def receive_next_task(sock):
+    while True:
+        try:
+            data, addr = sock.recvfrom(p.Max_Packet_Size)
+        except socket.timeout:
+            return None
+
+        try:
+            version, msg_type, task_id, worker_id, attempt, payload = (
+                p.decode_packet(data)
+            )
+        except ValueError as e:
+            log(f"DROP invalid packet from {addr}: {e}")
+            continue
+
+        log(f"RECV {msg_type.name} task={task_id} worker={worker_id}")
+
+        if msg_type == p.MessageTypes.TASK_DISPATCH:
+            return task_id, attempt, payload
+
+        log(f"ignored {msg_type.name} (waiting for TASK_DISPATCH)")
 
 
 def main():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(TIMEOUT)
+
     log(f"Worker {WORKER_ID} starting, server = {SERVER}")
+
     try:
-        # 1. Join, then wait for a task
+        # 1. Join the server and receive the first task
         log("SEND WORKER_JOIN")
-        join = p.create_packet(p.MessageTypes.WORKER_JOIN, 0, WORKER_ID, 1)
-        reply = send_and_wait(sock, join, p.MessageTypes.TASK_DISPATCH)
-        if reply is None:
-            log("No TASK_DISPATCH received (timeout). Giving up.")
-            return
-        task_id, payload = reply
+        join = p.create_packet(
+            p.MessageTypes.WORKER_JOIN, 0, WORKER_ID, 1
+        )
 
-        # 2. TASK_DISPATCH payload = two comma-separated ASCII integers, e.g. b"1,100"
-        try:
-            num1, num2 = (int(x) for x in payload.decode("ascii").split(","))
-        except ValueError:
-            log(f"Bad TASK_DISPATCH payload {payload!r}. Giving up.")
-            return
-        log(f"task {task_id}: {num1} + {num2}")
+        reply = send_and_wait(
+            sock, join, p.MessageTypes.TASK_DISPATCH
+        )
 
-        # 3. Compute, send TASK_RESULT (payload = the sum as ASCII, e.g. b"101"), wait for the ACK
-        result = num1 + num2
-        log(f"SEND TASK_RESULT task={task_id} result={result}")
-        packet = p.create_packet(p.MessageTypes.TASK_RESULT, task_id, WORKER_ID, 1,
-                                 str(result).encode("ascii"))
-        reply = send_and_wait(sock, packet, p.MessageTypes.ACK_RESULT)
         if reply is None:
-            log("No ACK_RESULT received (timeout).")
-        else:
-            log(f"task {task_id} acknowledged. Done.")
+            log("No TASK_DISPATCH received. Giving up.")
+            return
+
+        task_id, attempt, payload = reply
+
+        # 2. Keep processing tasks
+        while True:
+
+            try:
+                num1, num2 = (
+                    int(x) for x in payload.decode("ascii").split(",")
+                )
+            except ValueError:
+                log(f"Bad TASK_DISPATCH payload: {payload!r}")
+                break
+
+            log(f"task {task_id}: {num1} + {num2}")
+
+            result = num1 + num2
+
+            # Send result and wait for ACK
+            packet = p.create_packet(
+                p.MessageTypes.TASK_RESULT,
+                task_id,
+                WORKER_ID,
+                attempt,
+                str(result).encode("ascii")
+            )
+
+            reply = send_and_wait(
+                sock, packet, p.MessageTypes.ACK_RESULT
+            )
+
+            if reply is None:
+                log("No ACK_RESULT received. Stopping worker.")
+                break
+
+            log(f"task {task_id} acknowledged.")
+
+            # 3. Wait for the next task
+            reply = receive_next_task(sock)
+
+            if reply is None:
+                log("No more tasks received. Worker finished.")
+                break
+
+            task_id, attempt, payload = reply
+
     except OSError as e:
         log(f"Network error: {e}")
+
     finally:
         sock.close()
 

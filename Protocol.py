@@ -15,7 +15,7 @@ class MessageTypes(IntEnum):
     TASK_DISPATCH=3
     TASK_RESULT=4
     ACK_RESULT=5
-
+    STOP = 6
 
 def calculate_checksum(payload: bytes)->int:
     return zlib.crc32(payload) & 0xFFFFFFFF
